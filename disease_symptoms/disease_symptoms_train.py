@@ -19,10 +19,12 @@ print("DISEASE SYMPTOMS TRAIN")
 disease_train = pd.read_csv('augmented_disease_symptoms_train.csv')
 disease_test = pd.read_csv('augmented_disease_symptoms_test.csv')
 
-MODEL = "microsoft/biogpt"
+# MODEL = "microsoft/biogpt"
+# MODEL = "emilyalsentzer/Bio_ClinicalBERT"
+MODEL = "dmis-lab/biobert-v1.1"
 
-disease_biogpt_tokenizer = AutoTokenizer.from_pretrained(MODEL)
-disease_biogpt_model = AutoModelForSequenceClassification.from_pretrained(MODEL, num_labels=41, problem_type="multi_label_classification")
+disease_tokenizer = AutoTokenizer.from_pretrained(MODEL)
+disease_model = AutoModelForSequenceClassification.from_pretrained(MODEL, num_labels=41, problem_type="multi_label_classification")
 
 BATCH_SIZE = 64
 LR = 0.0001
@@ -175,8 +177,8 @@ def eval_on_test(checkpoint, model, tokenizer):
 
 
 
-# tr_loss, val_loss, val_acc = train(disease_biogpt_tokenizer, disease_biogpt_model)
+# tr_loss, val_loss, val_acc = train(disease_tokenizer, disease_model)
 # print(tr_loss, val_loss, val_acc)
 
-checkpt = "BioGptForSequenceClassification_Apr-27-2024_1525.pth"
-eval_on_test(checkpt, disease_biogpt_model, disease_biogpt_tokenizer)
+checkpt = "BertForSequenceClassification_Apr-27-2024_1625disease_symptoms.pth"
+eval_on_test(checkpt, disease_model, disease_tokenizer)
