@@ -10,19 +10,24 @@ import numpy as np
 import time
 from torcheval.metrics import MulticlassAccuracy
 import matplotlib.pyplot as plt
+import os
 
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
+print("DISEASE SYMPTOMS TRAIN")
 
 disease_train = pd.read_csv('augmented_disease_symptoms_train.csv')
 disease_test = pd.read_csv('augmented_disease_symptoms_test.csv')
 
-disease_biogpt_tokenizer = AutoTokenizer.from_pretrained("microsoft/biogpt")
-disease_biogpt_model = AutoModelForSequenceClassification.from_pretrained("microsoft/biogpt", num_labels=41, problem_type="multi_label_classification")
+MODEL = "microsoft/biogpt"
+
+disease_biogpt_tokenizer = AutoTokenizer.from_pretrained(MODEL)
+disease_biogpt_model = AutoModelForSequenceClassification.from_pretrained(MODEL, num_labels=41, problem_type="multi_label_classification")
 
 BATCH_SIZE = 64
 LR = 0.0001
 OPTIMIZER = "adam"
-EPOCHS = 5
+EPOCHS = 10
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(device)
@@ -55,35 +60,31 @@ def change_y_test(y_test, mapping):
     return res
 
 def plot(model_name, t_loss, v_loss):
-    plt.plot(range(len(t_loss)), t_loss, label='Training Loss')
-    plt.plot(range(len(t_loss)), v_loss, label='Validation Loss')
+    plt.plot(range(len(t_loss) - 1), t_loss[1:], label='Training Loss')
+    plt.plot(range(len(t_loss) - 1), v_loss[1:], label='Validation Loss')
     plt.xlabel("Epochs")
     plt.ylabel("Loss")
     plt.title(model_name + " Loss over Epochs")
     plt.legend()
 
     timestamp = time.strftime('%b-%d-%Y_%H%M', time.localtime())
-    plt.savefig('./plots/' + model_name + "_" + str(timestamp) + "_loss.png")
+    plt.savefig('../plots/' + model_name + "_" + str(timestamp) + "_disease_symptoms_loss.png")
 
 def train(tokenizer, model):
+    print("TRAINING")
     model = model.to(device)
 
     X_train = disease_train["sentence"]
     y_train, mapping = change_y_train(disease_train["prognosis"])
 
-    X_test = disease_test["sentence"]
-
-    y_test = change_y_test(disease_test["prognosis"], mapping)
+    # Only need to do this once to get the mapping saved
+    # y_test = change_y_test(disease_test["prognosis"], mapping)
+    # torch.save(y_test, 'disease_symptoms_test_labels.pt')
 
     X_train, X_valid, y_train, y_valid = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
 
     X_train = X_train.values.tolist()
     X_valid = X_valid.values.tolist()
-    X_test = X_test.values.tolist()
-
-    y_train = y_train.to(device)
-    y_valid = y_valid.to(device)
-    y_test = y_test.to(device)
 
     batch_idx = torch.arange(0, len(X_train), BATCH_SIZE)
 
@@ -93,16 +94,18 @@ def train(tokenizer, model):
     val_losses = []
     val_acc = []
 
-    for epoch in range(EPOCHS):
+    for epoch in range(EPOCHS+1):
+        torch.cuda.empty_cache()
         model.train()
         training_loss = 0
         for i in batch_idx:
             j = i.item()
             X = X_train[j: j + BATCH_SIZE]
-            y = y_train[j: j + BATCH_SIZE]
+            y = y_train[j: j + BATCH_SIZE].to(device)
 
             encoded_input = tokenizer(X, return_tensors='pt', padding=True, truncation=True).to(device)
             output = model(**encoded_input).logits
+            del encoded_input
         
             L = loss_fn(output, y)
             training_loss += len(X) * L
@@ -117,7 +120,8 @@ def train(tokenizer, model):
 
         with torch.no_grad():
             encoded_input = tokenizer(X_valid, return_tensors='pt', padding=True, truncation=True).to(device)
-            valid_output = model(**encoded_input).logits
+            valid_output = model(**encoded_input).logits.cpu()
+            del encoded_input
 
             valid_loss = loss_fn(valid_output, y_valid)
             val_losses.append(valid_loss.item())
@@ -133,33 +137,46 @@ def train(tokenizer, model):
             print('\tEPOCH: ', epoch, ', Training Loss: ', training_loss.item() / len(X_train), ', Validation Loss: ', valid_loss.item(), ', Validation Acc: ', acc)
 
     timestamp = time.strftime('%b-%d-%Y_%H%M', time.localtime())
-    torch.save(model.state_dict(), type(model).__name__ + "_" + timestamp + ".pth")
+    torch.save(model.state_dict(), type(model).__name__ + "_" + timestamp + "disease_symptoms.pth")
 
     plot(type(model).__name__, tr_losses, val_losses)
 
-    # Eval on test
+    torch.cuda.empty_cache()
+    return tr_losses, val_losses, val_acc
+
+def eval_on_test(checkpoint, model, tokenizer):
+    X_test = disease_test["sentence"].values.tolist()
+    y_test = torch.load('disease_symptoms_test_labels.pt')
+    model.load_state_dict(torch.load(checkpoint))
+    model = model.to(device)
+
     test_batch_idx = torch.arange(0, len(X_test), BATCH_SIZE)
     testing_loss = 0
     metric = MulticlassAccuracy()
-    for i in test_batch_idx:
-        j = i.item()
-        X = X_test[j: j + BATCH_SIZE]
-        y = y_test[j: j + BATCH_SIZE]
+    with torch.no_grad():
+        for i in test_batch_idx:
+            j = i.item()
+            X = X_test[j: j + BATCH_SIZE]
+            y = y_test[j: j + BATCH_SIZE]
 
-        encoded_input = tokenizer(X, return_tensors='pt', padding=True, truncation=True).to(device)
-        output = model(**encoded_input).logits
+            encoded_input = tokenizer(X, return_tensors='pt', padding=True, truncation=True).to(device)
+            output = model(**encoded_input).logits.cpu()
 
-        L = loss_fn(output, y)
-        testing_loss += len(X) * L
+            del encoded_input
 
-        _, labels = y.max(dim=1)
-        metric.update(softmax(valid_output), labels)
+            L = loss_fn(output, y)
+            testing_loss += len(X) * L
+
+            _, labels = y.max(dim=1)
+            metric.update(softmax(output), labels)
 
     print("Test Loss: ", testing_loss.item() / len(X_test))
     print("Test Accuracy: ", metric.compute().item())
 
-    return tr_losses, val_losses, val_acc
 
 
-tr_loss, val_loss, val_acc = train(disease_biogpt_tokenizer, disease_biogpt_model)
-print(tr_loss, val_loss, val_acc)
+# tr_loss, val_loss, val_acc = train(disease_biogpt_tokenizer, disease_biogpt_model)
+# print(tr_loss, val_loss, val_acc)
+
+checkpt = "BioGptForSequenceClassification_Apr-27-2024_1525.pth"
+eval_on_test(checkpt, disease_biogpt_model, disease_biogpt_tokenizer)
