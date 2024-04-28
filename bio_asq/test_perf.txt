@@ -1,0 +1,11 @@
+biogpt
+Test Loss:  0.9296124965990361
+Test Accuracy:  0.7164179086685181
+
+clinicalbert
+Test Loss:  0.6009277799236241
+Test Accuracy:  0.823383092880249
+
+biobert
+Test Loss:  0.572873243645056
+Test Accuracy:  0.8407959938049316
