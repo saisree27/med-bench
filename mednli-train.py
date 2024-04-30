@@ -1,18 +1,12 @@
-import csv
-import pandas as pd
-from transformers import AutoTokenizer, AutoModelForSequenceClassification,AutoModelForQuestionAnswering
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 from datasets import load_dataset
 from torch.nn.functional import cross_entropy, one_hot, softmax
 from torch.optim import Adam
-from sklearn.model_selection import train_test_split
-import numpy as np
 import time
 from torcheval.metrics import MulticlassAccuracy
 import matplotlib.pyplot as plt
-import sacremoses
-from torch.utils.data import Dataset, DataLoader, TensorDataset
-from pytorch_forecasting.data.timeseries import TimeSeriesDataSet
+from torch.utils.data import DataLoader, TensorDataset
 from torch.nn import DataParallel
 import os
 
@@ -20,7 +14,7 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
 
 torch.cuda.init()
 num_gpus = torch.cuda.device_count()
-TRAIN_BATCH_SIZE = 16
+TRAIN_BATCH_SIZE = 32
 VALID_BATCH_SIZE = 256 
 TEST_BATCH_SIZE = 256
 LR = 0.0001
@@ -36,16 +30,16 @@ mednli_valid = mednli_dataset['valid']
 mednli_biogpt_tokenizer = AutoTokenizer.from_pretrained("microsoft/biogpt", use_fast=True)
 mednli_biogpt_model = AutoModelForSequenceClassification.from_pretrained("microsoft/biogpt", num_labels=3, problem_type="multi_label_classification")
 
-# mednli_clinical_bert_tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
-# mednli_clinical_bert_model = AutoModelForSequenceClassification.from_pretrained("emilyalsentzer/Bio_ClinicalBERT", num_labels=3, problem_type="multi_label_classification")
+mednli_clinical_bert_tokenizer = AutoTokenizer.from_pretrained("emilyalsentzer/Bio_ClinicalBERT")
+mednli_clinical_bert_model = AutoModelForSequenceClassification.from_pretrained("emilyalsentzer/Bio_ClinicalBERT", num_labels=3, problem_type="multi_label_classification")
 
-# mednli_bio_bert_tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
-# mednli_bio_bert_model = AutoModelForSequenceClassification.from_pretrained("dmis-lab/biobert-v1.1", num_labels=3, problem_type="multi_label_classification")
+mednli_bio_bert_tokenizer = AutoTokenizer.from_pretrained("dmis-lab/biobert-v1.1")
+mednli_bio_bert_model = AutoModelForSequenceClassification.from_pretrained("dmis-lab/biobert-v1.1", num_labels=3, problem_type="multi_label_classification")
 
 if num_gpus > 1:
     mednli_biogpt_model = DataParallel(mednli_biogpt_model).to(device)
-    # mednli_clinical_bert_model = DataParallel(mednli_clinical_bert_model).to(device)
-    # mednli_bio_bert_model = DataParallel(mednli_bio_bert_model).to(device)
+    mednli_clinical_bert_model = DataParallel(mednli_clinical_bert_model).to(device)
+    mednli_bio_bert_model = DataParallel(mednli_bio_bert_model).to(device)
 
 print(f"Using {device} with {num_gpus} GPUS.")
 
@@ -175,7 +169,7 @@ def train(tokenizer, model):
 
     print("Testing")
     with torch.no_grad():
-        for i, batch in enumerate(test_data_loader, 0):
+        for _, batch in enumerate(test_data_loader, 0):
             input_ids, attention_masks, y = batch
             input_ids = input_ids.to(device)
             attention_masks = attention_masks.to(device)
@@ -198,10 +192,10 @@ print("Training BioGPT Model")
 tr_loss, val_loss, val_acc = train(mednli_biogpt_tokenizer, mednli_biogpt_model)
 print(tr_loss, val_loss, val_acc)
 
-# print("Training Clincal Bert Model")
-# tr_loss, val_loss, val_acc = train(mednli_clinical_bert_tokenizer, mednli_clinical_bert_model)
-# print(tr_loss, val_loss, val_acc)
+print("Training Clincal Bert Model")
+tr_loss, val_loss, val_acc = train(mednli_clinical_bert_tokenizer, mednli_clinical_bert_model)
+print(tr_loss, val_loss, val_acc)
 
-# print("Training Bio Bert Model")
-# tr_loss, val_loss, val_acc = train(mednli_bio_bert_tokenizer, mednli_bio_bert_model)
-# print(tr_loss, val_loss, val_acc)
+print("Training Bio Bert Model")
+tr_loss, val_loss, val_acc = train(mednli_bio_bert_tokenizer, mednli_bio_bert_model)
+print(tr_loss, val_loss, val_acc)
